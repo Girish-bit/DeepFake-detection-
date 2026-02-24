@@ -1,0 +1,7 @@
+{
+  "name": "DeepGuard",
+  "description": "Advanced Deepfake Detection System using AI analysis to identify manipulated facial regions.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
