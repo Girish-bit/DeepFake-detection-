@@ -96,7 +96,7 @@ export default function App() {
     try {
       const apiKey = process.env.GEMINI_API_KEY;
       if (!apiKey || apiKey === 'undefined' || apiKey === '') {
-        throw new Error("API_KEY_MISSING: Gemini API Key is not configured. Please add your GEMINI_API_KEY to the Secrets panel in AI Studio.");
+        throw new Error("API_KEY_MISSING: Gemini API Key is not configured. Please add 'GOOGLE_API_KEY' to the Secrets panel in AI Studio.");
       }
 
       const ai = new GoogleGenAI({ apiKey });
@@ -164,7 +164,7 @@ export default function App() {
       if (msg.includes("API_KEY_INVALID")) {
         msg = "Invalid Gemini API Key. Please ensure your API key is correctly configured in the Secrets panel.";
       } else if (msg.includes("API_KEY_MISSING")) {
-        msg = "Gemini API Key is missing. Please add your GEMINI_API_KEY to the Secrets panel in AI Studio and restart the app.";
+        msg = "Gemini API Key is missing. Please add 'GOOGLE_API_KEY' to the Secrets panel in AI Studio and restart the app.";
       }
       setError(msg);
     } finally {
