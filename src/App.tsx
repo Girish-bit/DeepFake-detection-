@@ -12,6 +12,7 @@ import {
   CheckCircle, 
   FileVideo, 
   Image as ImageIcon,
+  Camera,
   Loader2,
   Info,
   Zap,
@@ -41,7 +42,19 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<DetectionResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [isLiveMode, setIsLiveMode] = useState(false);
+  const [videoStream, setVideoStream] = useState<MediaStream | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
+  const liveVideoRef = useRef<HTMLVideoElement>(null);
+  const analysisTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Handle live video stream attachment
+  React.useEffect(() => {
+    if (isLiveMode && videoStream && liveVideoRef.current) {
+      liveVideoRef.current.srcObject = videoStream;
+      liveVideoRef.current.play().catch(err => console.error("Video play error:", err));
+    }
+  }, [isLiveMode, videoStream]);
 
   const onDrop = useCallback((acceptedFiles: File[]) => {
     const selectedFile = acceptedFiles[0];
@@ -79,20 +92,15 @@ export default function App() {
 
   const extractFrame = (video: HTMLVideoElement): string => {
     const canvas = document.createElement('canvas');
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
+    canvas.width = video.videoWidth || 640;
+    canvas.height = video.videoHeight || 480;
     const ctx = canvas.getContext('2d');
     if (!ctx) return '';
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
     return canvas.toDataURL('image/jpeg').split(',')[1];
   };
 
-  const handleDetect = async () => {
-    if (!file) return;
-
-    setLoading(true);
-    setError(null);
-
+  const performAnalysis = async (base64Data: string, mimeType: string, isLive: boolean = false) => {
     try {
       const apiKey = process.env.GEMINI_API_KEY;
       if (!apiKey || apiKey === 'undefined' || apiKey === '') {
@@ -100,31 +108,21 @@ export default function App() {
       }
 
       const ai = new GoogleGenAI({ apiKey });
-      const isVideo = file.type.startsWith('video/');
       
-      let parts: any[] = [];
-      const prompt = `
-        Analyze this ${isVideo ? 'video frame' : 'image'} for signs of deepfake manipulation. 
-        Look for:
-        1. Inconsistencies in lighting and shadows.
-        2. Blurred edges around the face or hair.
-        3. Unnatural skin textures or "glitches".
-        4. Mismatched eye reflections or iris details.
-        5. Artifacts around the mouth or teeth.
+      let parts: any[] = [
+        { inlineData: { data: base64Data, mimeType } },
+        { text: `
+          Analyze this ${isLive ? 'live camera frame' : 'media'} for signs of deepfake manipulation. 
+          Look for:
+          1. Inconsistencies in lighting and shadows.
+          2. Blurred edges around the face or hair.
+          3. Unnatural skin textures or "glitches".
+          4. Mismatched eye reflections or iris details.
+          5. Artifacts around the mouth or teeth.
 
-        Provide a verdict (REAL or FAKE), a confidence score (0-100), and a list of specific regions that look suspicious.
-      `;
-
-      if (isVideo && videoRef.current) {
-        // Extract a few frames for analysis
-        const base64Frame = extractFrame(videoRef.current);
-        parts.push({ inlineData: { data: base64Frame, mimeType: 'image/jpeg' } });
-      } else {
-        const base64 = await fileToBase64(file);
-        parts.push({ inlineData: { data: base64, mimeType: file.type } });
-      }
-      
-      parts.push({ text: prompt });
+          Provide a verdict (REAL or FAKE), a confidence score (0-100), and a list of specific regions that look suspicious.
+        `}
+      ];
 
       const response = await ai.models.generateContent({
         model: "gemini-3-flash-preview",
@@ -149,14 +147,38 @@ export default function App() {
       });
 
       let text = response.text || "";
-      // Clean JSON if model wraps it in markdown blocks
       if (text.startsWith("```json")) {
         text = text.replace(/^```json\n?/, "").replace(/\n?```$/, "");
       } else if (text.startsWith("```")) {
         text = text.replace(/^```\n?/, "").replace(/\n?```$/, "");
       }
 
-      const data = JSON.parse(text.trim());
+      return JSON.parse(text.trim());
+    } catch (err: any) {
+      throw err;
+    }
+  };
+
+  const handleDetect = async () => {
+    if (!file) return;
+
+    setLoading(true);
+    setError(null);
+
+    try {
+      const isVideo = file.type.startsWith('video/');
+      let base64Data = '';
+      let mimeType = '';
+
+      if (isVideo && videoRef.current) {
+        base64Data = extractFrame(videoRef.current);
+        mimeType = 'image/jpeg';
+      } else {
+        base64Data = await fileToBase64(file);
+        mimeType = file.type;
+      }
+      
+      const data = await performAnalysis(base64Data, mimeType);
       setResult(data);
     } catch (err: any) {
       console.error("Detection error:", err);
@@ -172,7 +194,65 @@ export default function App() {
     }
   };
 
+  const startLiveMode = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        video: { 
+          width: { ideal: 1280 },
+          height: { ideal: 720 }
+        } 
+      });
+      setVideoStream(stream);
+      setIsLiveMode(true);
+      setPreview(null);
+      setFile(null);
+      setResult(null);
+      setError(null);
+    } catch (err: any) {
+      setError("Camera access denied or not available. Please ensure you have granted camera permissions.");
+      console.error(err);
+    }
+  };
+
+  // Handle periodic analysis in live mode
+  React.useEffect(() => {
+    if (isLiveMode && videoStream) {
+      analysisTimerRef.current = setInterval(async () => {
+        if (liveVideoRef.current && liveVideoRef.current.readyState >= 2) {
+          try {
+            const frame = extractFrame(liveVideoRef.current);
+            if (frame) {
+              const data = await performAnalysis(frame, 'image/jpeg', true);
+              setResult(data);
+            }
+          } catch (e) {
+            console.error("Live analysis error:", e);
+          }
+        }
+      }, 5000);
+    }
+
+    return () => {
+      if (analysisTimerRef.current) {
+        clearInterval(analysisTimerRef.current);
+      }
+    };
+  }, [isLiveMode, videoStream]);
+
+  const stopLiveMode = () => {
+    if (videoStream) {
+      videoStream.getTracks().forEach(track => track.stop());
+    }
+    if (analysisTimerRef.current) {
+      clearInterval(analysisTimerRef.current);
+    }
+    setVideoStream(null);
+    setIsLiveMode(false);
+    setResult(null);
+  };
+
   const reset = () => {
+    stopLiveMode();
     setFile(null);
     setPreview(null);
     setResult(null);
@@ -227,7 +307,7 @@ export default function App() {
             </div>
 
             <div className="p-8">
-              {!preview ? (
+              {!preview && !isLiveMode ? (
                 <div 
                   {...getRootProps()} 
                   className={cn(
@@ -246,16 +326,24 @@ export default function App() {
                 </div>
               ) : (
                 <div className="relative rounded-2xl overflow-hidden bg-black aspect-video flex items-center justify-center border border-white/10 group">
-                  {file?.type.startsWith('video/') ? (
+                  {isLiveMode ? (
+                    <video 
+                      ref={liveVideoRef}
+                      autoPlay 
+                      playsInline 
+                      muted
+                      className="max-h-full w-full object-cover scale-x-[-1]" 
+                    />
+                  ) : file?.type.startsWith('video/') ? (
                     <video 
                       ref={videoRef}
-                      src={preview} 
+                      src={preview!} 
                       controls 
                       className="max-h-full" 
                       crossOrigin="anonymous"
                     />
                   ) : (
-                    <img src={preview} alt="Preview" className="max-h-full object-contain" />
+                    <img src={preview!} alt="Preview" className="max-h-full object-contain" />
                   )}
                   
                   <div className="absolute top-4 right-4 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -265,8 +353,8 @@ export default function App() {
                   </div>
 
                   {/* Scanning Overlay */}
-                  {loading && (
-                    <div className="absolute inset-0 bg-black/40 backdrop-blur-[2px] flex flex-col items-center justify-center gap-4">
+                  {(loading || isLiveMode) && (
+                    <div className="absolute inset-0 pointer-events-none">
                       <div className="w-full h-1 bg-emerald-500/20 absolute top-0 overflow-hidden">
                         <motion.div 
                           className="h-full bg-emerald-500 shadow-[0_0_15px_rgba(16,185,129,0.5)]"
@@ -274,8 +362,18 @@ export default function App() {
                           transition={{ duration: 1.5, repeat: Infinity, ease: "linear" }}
                         />
                       </div>
-                      <Loader2 className="w-10 h-10 text-emerald-500 animate-spin" />
-                      <p className="text-sm font-mono text-emerald-500 animate-pulse uppercase tracking-widest">Analyzing Neural Artifacts...</p>
+                      {loading && (
+                        <div className="absolute inset-0 bg-black/40 backdrop-blur-[2px] flex flex-col items-center justify-center gap-4">
+                          <Loader2 className="w-10 h-10 text-emerald-500 animate-spin" />
+                          <p className="text-sm font-mono text-emerald-500 animate-pulse uppercase tracking-widest">Analyzing Neural Artifacts...</p>
+                        </div>
+                      )}
+                      {isLiveMode && !loading && (
+                        <div className="absolute top-4 left-4 flex items-center gap-2 px-3 py-1.5 bg-red-500/20 border border-red-500/40 rounded-full">
+                          <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+                          <span className="text-[10px] font-bold text-red-500 tracking-widest uppercase">Live Analysis Active</span>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
@@ -300,7 +398,10 @@ export default function App() {
                       };
                       input.click();
                     }}
-                    className="flex items-center gap-2 text-xs text-zinc-500 hover:text-emerald-500 transition-colors"
+                    className={cn(
+                      "flex items-center gap-2 text-xs transition-colors",
+                      !isLiveMode && !file?.type.startsWith('video/') && file ? "text-emerald-500" : "text-zinc-500 hover:text-emerald-500"
+                    )}
                   >
                     <ImageIcon className="w-3 h-3" />
                     IMAGE MODE
@@ -322,25 +423,55 @@ export default function App() {
                       };
                       input.click();
                     }}
-                    className="flex items-center gap-2 text-xs text-zinc-500 hover:text-emerald-500 transition-colors"
+                    className={cn(
+                      "flex items-center gap-2 text-xs transition-colors",
+                      file?.type.startsWith('video/') ? "text-emerald-500" : "text-zinc-500 hover:text-emerald-500"
+                    )}
                   >
                     <FileVideo className="w-3 h-3" />
                     VIDEO MODE
                   </button>
+                  <button 
+                    onClick={() => {
+                      if (isLiveMode) {
+                        stopLiveMode();
+                      } else {
+                        startLiveMode();
+                      }
+                    }}
+                    className={cn(
+                      "flex items-center gap-2 text-xs transition-colors",
+                      isLiveMode ? "text-emerald-500" : "text-zinc-500 hover:text-emerald-500"
+                    )}
+                  >
+                    <Camera className="w-3 h-3" />
+                    REAL-TIME MODE
+                  </button>
                 </div>
-                <button
-                  disabled={!file || loading}
-                  onClick={handleDetect}
-                  className={cn(
-                    "px-8 py-3 rounded-xl font-bold text-sm flex items-center gap-2 transition-all",
-                    !file || loading 
-                      ? "bg-zinc-800 text-zinc-500 cursor-not-allowed" 
-                      : "bg-emerald-500 text-black hover:bg-emerald-400 hover:shadow-[0_0_20px_rgba(16,185,129,0.3)]"
-                  )}
-                >
-                  {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Zap className="w-4 h-4" />}
-                  RUN DETECTION
-                </button>
+                {!isLiveMode && (
+                  <button
+                    disabled={!file || loading}
+                    onClick={handleDetect}
+                    className={cn(
+                      "px-8 py-3 rounded-xl font-bold text-sm flex items-center gap-2 transition-all",
+                      !file || loading 
+                        ? "bg-zinc-800 text-zinc-500 cursor-not-allowed" 
+                        : "bg-emerald-500 text-black hover:bg-emerald-400 hover:shadow-[0_0_20px_rgba(16,185,129,0.3)]"
+                    )}
+                  >
+                    {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Zap className="w-4 h-4" />}
+                    RUN DETECTION
+                  </button>
+                )}
+                {isLiveMode && (
+                  <button
+                    onClick={stopLiveMode}
+                    className="px-8 py-3 rounded-xl font-bold text-sm flex items-center gap-2 transition-all bg-red-500 text-white hover:bg-red-400"
+                  >
+                    <RefreshCcw className="w-4 h-4" />
+                    STOP CAMERA
+                  </button>
+                )}
               </div>
             </div>
           </section>
