@@ -37,6 +37,7 @@ interface DetectionResult {
 }
 
 export default function App() {
+  const [view, setView] = useState<'landing' | 'app'>('landing');
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -159,6 +160,38 @@ export default function App() {
     }
   };
 
+  const optimizeImage = (base64: string): Promise<string> => {
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.src = `data:image/jpeg;base64,${base64}`;
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        const MAX_WIDTH = 1024;
+        const MAX_HEIGHT = 1024;
+        let width = img.width;
+        let height = img.height;
+
+        if (width > height) {
+          if (width > MAX_WIDTH) {
+            height *= MAX_WIDTH / width;
+            width = MAX_WIDTH;
+          }
+        } else {
+          if (height > MAX_HEIGHT) {
+            width *= MAX_HEIGHT / height;
+            height = MAX_HEIGHT;
+          }
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx?.drawImage(img, 0, 0, width, height);
+        resolve(canvas.toDataURL('image/jpeg', 0.8).split(',')[1]);
+      };
+    });
+  };
+
   const handleDetect = async () => {
     if (!file) return;
 
@@ -168,14 +201,13 @@ export default function App() {
     try {
       const isVideo = file.type.startsWith('video/');
       let base64Data = '';
-      let mimeType = '';
+      let mimeType = 'image/jpeg';
 
       if (isVideo && videoRef.current) {
         base64Data = extractFrame(videoRef.current);
-        mimeType = 'image/jpeg';
       } else {
-        base64Data = await fileToBase64(file);
-        mimeType = file.type;
+        const rawBase64 = await fileToBase64(file);
+        base64Data = await optimizeImage(rawBase64);
       }
       
       const data = await performAnalysis(base64Data, mimeType);
@@ -261,33 +293,157 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-[#0A0A0B] text-zinc-100 font-sans selection:bg-emerald-500/30">
-      {/* Header */}
-      <header className="border-b border-white/5 bg-black/40 backdrop-blur-xl sticky top-0 z-50">
-        <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-emerald-500/10 rounded-xl flex items-center justify-center border border-emerald-500/20">
-              <Shield className="w-6 h-6 text-emerald-500" />
-            </div>
-            <div>
-              <h1 className="text-lg font-bold tracking-tight">DEEPGUARD</h1>
-              <p className="text-[10px] text-zinc-500 font-mono uppercase tracking-widest">Neural Analysis System v4.2</p>
-            </div>
-          </div>
-          <nav className="hidden md:flex items-center gap-8 text-xs font-medium text-zinc-400">
-            <a href="#" className="hover:text-white transition-colors">DASHBOARD</a>
-            <a href="#" className="hover:text-white transition-colors">HISTORY</a>
-            <a href="#" className="hover:text-white transition-colors">DOCUMENTATION</a>
-            <div className="h-4 w-px bg-white/10" />
-            <div className="flex items-center gap-2 text-emerald-500">
-              <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-              SYSTEM ACTIVE
-            </div>
-          </nav>
-        </div>
-      </header>
+      <AnimatePresence mode="wait">
+        {view === 'landing' ? (
+          <motion.div
+            key="landing"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0, y: -20 }}
+            className="relative min-h-screen overflow-hidden"
+          >
+            {/* Background Glows */}
+            <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-emerald-500/10 blur-[120px] rounded-full" />
+            <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-blue-500/10 blur-[120px] rounded-full" />
 
-      <main className="max-w-7xl mx-auto px-6 py-12 grid grid-cols-1 lg:grid-cols-12 gap-8">
-        {/* Left Column: Upload & Preview */}
+            {/* Navigation */}
+            <nav className="relative z-10 max-w-7xl mx-auto px-6 h-24 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Shield className="w-8 h-8 text-emerald-500" />
+                <span className="text-xl font-black tracking-tighter">DEEPGUARD</span>
+              </div>
+              <div className="hidden md:flex items-center gap-8 text-[10px] font-bold tracking-widest text-zinc-500">
+                <a href="#" className="hover:text-white transition-colors">TECHNOLOGY</a>
+                <a href="#" className="hover:text-white transition-colors">RESEARCH</a>
+                <a href="#" className="hover:text-white transition-colors">API</a>
+                <button 
+                  onClick={() => setView('app')}
+                  className="px-6 py-2 bg-white/5 border border-white/10 rounded-full hover:bg-white/10 transition-colors text-white"
+                >
+                  LAUNCH APP
+                </button>
+              </div>
+            </nav>
+
+            {/* Hero Section */}
+            <main className="relative z-10 max-w-7xl mx-auto px-6 pt-20 pb-32">
+              <div className="max-w-4xl">
+                <motion.div
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.2 }}
+                >
+                  <span className="inline-block px-3 py-1 bg-emerald-500/10 border border-emerald-500/20 rounded-full text-[10px] font-bold text-emerald-500 tracking-widest uppercase mb-6">
+                    Neural Integrity Protocol v4.2
+                  </span>
+                  <h1 className="text-6xl md:text-8xl font-black tracking-tighter leading-[0.9] mb-8">
+                    TRUST NOTHING <br />
+                    <span className="text-transparent bg-clip-text bg-gradient-to-r from-emerald-400 to-blue-500">
+                      VERIFY EVERYTHING.
+                    </span>
+                  </h1>
+                  <p className="text-lg md:text-xl text-zinc-400 max-w-2xl leading-relaxed mb-12">
+                    DeepGuard uses advanced neural networks to identify synthetic facial manipulations in real-time. Protect your digital identity with the world's most precise deepfake detection engine.
+                  </p>
+                  <div className="flex flex-col sm:flex-row gap-4">
+                    <button 
+                      onClick={() => setView('app')}
+                      className="group px-8 py-4 bg-emerald-500 text-black font-bold rounded-2xl flex items-center justify-center gap-3 hover:bg-emerald-400 transition-all hover:shadow-[0_0_30px_rgba(16,185,129,0.4)]"
+                    >
+                      START ANALYSIS
+                      <Zap className="w-5 h-5 group-hover:scale-110 transition-transform" />
+                    </button>
+                    <button className="px-8 py-4 bg-white/5 border border-white/10 text-white font-bold rounded-2xl hover:bg-white/10 transition-all">
+                      VIEW DOCUMENTATION
+                    </button>
+                  </div>
+                </motion.div>
+
+                {/* Stats */}
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-8 mt-24 border-t border-white/5 pt-12">
+                  {[
+                    { label: 'ACCURACY', value: '99.4%' },
+                    { label: 'LATENCY', value: '< 2.4s' },
+                    { label: 'ANALYSIS', value: 'REAL-TIME' },
+                    { label: 'MODELS', value: 'MULTIMODAL' },
+                  ].map((stat, i) => (
+                    <div key={i}>
+                      <p className="text-[10px] font-bold text-zinc-600 tracking-widest uppercase mb-1">{stat.label}</p>
+                      <p className="text-2xl font-mono font-bold text-zinc-300">{stat.value}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </main>
+
+            {/* Feature Grid */}
+            <section className="relative z-10 max-w-7xl mx-auto px-6 py-32 border-t border-white/5">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+                {[
+                  {
+                    icon: <Camera className="w-6 h-6" />,
+                    title: "Real-Time Analysis",
+                    desc: "Monitor live video streams for frame-by-frame synthetic artifacts."
+                  },
+                  {
+                    icon: <Shield className="w-6 h-6" />,
+                    title: "Neural Integrity",
+                    desc: "Deep scan facial regions for lighting, texture, and iris inconsistencies."
+                  },
+                  {
+                    icon: <Activity className="w-6 h-6" />,
+                    title: "Temporal Scanning",
+                    desc: "Analyze motion flow to detect jitter and unnatural blinking patterns."
+                  }
+                ].map((feature, i) => (
+                  <div key={i} className="p-8 bg-white/5 border border-white/10 rounded-3xl hover:border-emerald-500/30 transition-colors group">
+                    <div className="w-12 h-12 bg-emerald-500/10 rounded-2xl flex items-center justify-center text-emerald-500 mb-6 group-hover:scale-110 transition-transform">
+                      {feature.icon}
+                    </div>
+                    <h3 className="text-xl font-bold mb-3">{feature.title}</h3>
+                    <p className="text-zinc-500 text-sm leading-relaxed">{feature.desc}</p>
+                  </div>
+                ))}
+              </div>
+            </section>
+          </motion.div>
+        ) : (
+          <motion.div
+            key="app"
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0 }}
+          >
+            {/* Header */}
+            <header className="border-b border-white/5 bg-black/40 backdrop-blur-xl sticky top-0 z-50">
+              <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
+                <div 
+                  className="flex items-center gap-3 cursor-pointer"
+                  onClick={() => setView('landing')}
+                >
+                  <div className="w-10 h-10 bg-emerald-500/10 rounded-xl flex items-center justify-center border border-emerald-500/20">
+                    <Shield className="w-6 h-6 text-emerald-500" />
+                  </div>
+                  <div>
+                    <h1 className="text-lg font-bold tracking-tight">DEEPGUARD</h1>
+                    <p className="text-[10px] text-zinc-500 font-mono uppercase tracking-widest">Neural Analysis System v4.2</p>
+                  </div>
+                </div>
+                <nav className="hidden md:flex items-center gap-8 text-xs font-medium text-zinc-400">
+                  <button onClick={() => setView('landing')} className="hover:text-white transition-colors">HOME</button>
+                  <a href="#" className="hover:text-white transition-colors">DASHBOARD</a>
+                  <a href="#" className="hover:text-white transition-colors">HISTORY</a>
+                  <div className="h-4 w-px bg-white/10" />
+                  <div className="flex items-center gap-2 text-emerald-500">
+                    <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                    SYSTEM ACTIVE
+                  </div>
+                </nav>
+              </div>
+            </header>
+
+            <main className="max-w-7xl mx-auto px-6 py-12 grid grid-cols-1 lg:grid-cols-12 gap-8">
+              {/* Left Column: Upload & Preview */}
         <div className="lg:col-span-7 space-y-6">
           <section className="bg-zinc-900/50 border border-white/5 rounded-3xl overflow-hidden">
             <div className="p-6 border-b border-white/5 flex items-center justify-between bg-white/5">
@@ -321,7 +477,7 @@ export default function App() {
                   </div>
                   <div className="text-center">
                     <p className="text-sm font-medium">Drop media here or click to browse</p>
-                    <p className="text-xs text-zinc-500 mt-1">Supports JPG, PNG, MP4, MOV (Max 50MB)</p>
+                    <p className="text-xs text-zinc-500 mt-1">Optimized for JPG, PNG, MP4, MOV (Max 20MB)</p>
                   </div>
                 </div>
               ) : (
@@ -616,7 +772,10 @@ export default function App() {
             </div>
           </section>
         </div>
-      </main>
+            </main>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Footer */}
       <footer className="max-w-7xl mx-auto px-6 py-12 border-t border-white/5">
